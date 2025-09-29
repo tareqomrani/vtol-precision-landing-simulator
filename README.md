@@ -1,4 +1,4 @@
-# 🛩️ VTOL Precision Landing Simulator
+![VTOL Precision Landing Simulator](assets/banner.png)
 
 **Streamlit app** for simulating **precision eVTOL/Hybrid VTOL landings** in confined spaces using RTK GNSS, lidar, and vision targets.  
 _Not flight software._
