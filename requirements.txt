@@ -1,0 +1,10 @@
+# Core app
+streamlit>=1.29
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+pillow>=9.5
+
+# Vision backends (optional but supported by the app)
+opencv-contrib-python-headless>=4.8
+pupil-apriltags>=1.0.4
