@@ -1,8 +1,9 @@
-# vtol_precision_landing_app.py
-# 🛩️ VTOL Precision Landing Simulator — eVTOL dataset
-# Digital-green theme • 3D cone • ArUco/AprilTag assist • Kalman filter
-# Landing Success Score + Auto-Tuner • Apply Best Settings (session_state)
-# Scenario Presets • In-place animations • Run Log Export (JSON/CSV/ZIP)
+# app.py
+# 🛩️ VTOL Precision Landing Simulator — Light Theme (Accessible)
+# Streamlit app: eVTOL dataset • Scenario Presets • ArUco/AprilTag panel
+# In-place Landing Playback (2D/3D) • Kalman filter • Metrics & Score
+# Log Export (CSV/JSON/ZIP) • Auto-Tuner with Apply Best Settings
+# Vectorized marker pixel model • RTK/Lidar toggles • Vision controls
 
 import io
 import json
@@ -35,24 +36,35 @@ except Exception:
 APP_VERSION = "1.3.0"
 
 # ─────────────────────────────────────────────
-# Page / Theme
+# Page / Light Theme Styling
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="🛩️ VTOL Precision Landing", page_icon="🛩️", layout="wide")
-DIGITAL_GREEN = "#00D084"
-BG_DARK = "#0b2a2a"
-FG_LIGHT = "#d7fff0"
-st.markdown(
-    f"""
-    <style>
-      .stApp {{ background:{BG_DARK}; color:{FG_LIGHT}; }}
-      .block-container {{ padding-top:1.5rem; }}
-      h1, h2, h3 {{ color:{DIGITAL_GREEN} !important; }}
-      .stButton>button {{ background:{DIGITAL_GREEN}; color:black; font-weight:600; border:0; }}
-      .metric-box {{ border:1px solid {DIGITAL_GREEN}; border-radius:8px; padding:12px; margin:6px 0; }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+
+# Accessible light theme accent + high-contrast text
+ACCENT = "#0B6E4F"     # teal
+TEXT_DARK = "#0B1F2A"  # near-black
+
+# Minimal CSS to match the light theme
+st.markdown(f"""
+<style>
+  .block-container {{ padding-top: 1.2rem; }}
+  h1, h2, h3 {{ color: {ACCENT} !important; }}
+  .stButton > button {{
+    background: {ACCENT}; color: #ffffff; font-weight: 600; border: 0;
+  }}
+</style>
+""", unsafe_allow_html=True)
+
+# Matplotlib defaults for light background
+plt.rcParams.update({
+    "figure.facecolor": "white",
+    "axes.facecolor": "white",
+    "axes.edgecolor": TEXT_DARK,
+    "axes.labelcolor": TEXT_DARK,
+    "xtick.color": TEXT_DARK,
+    "ytick.color": TEXT_DARK,
+    "grid.color": "#B9C2CC"
+})
 
 st.title("🛩️ VTOL Precision Landing Simulator")
 st.caption("RTK • Lidar • EKF-style fusion • ArUco/AprilTag assist • Kalman smoothing • 3D cone • Auto-Tuner • Run Log Export")
@@ -69,7 +81,7 @@ uav_data = {
     "Censys Sentaero VTOL": {"type": "Hybrid Fixed-Wing eVTOL", "rtk": True, "lidar": True, "hover_draw_W": 240, "cruise_draw_W": 100},
     "Atmos Marlyn Cobalt": {"type": "Hybrid Fixed-Wing eVTOL", "rtk": True, "lidar": True, "hover_draw_W": 230, "cruise_draw_W": 90},
     "ALTI Transition": {"type": "Hybrid Fixed-Wing eVTOL", "rtk": True, "lidar": True, "hover_draw_W": 300, "cruise_draw_W": 140},
-    # Multirotors (still eVTOL)
+    # Multirotor (still eVTOL)
     "Percepto Air Max": {"type": "Multirotor eVTOL (industrial)", "rtk": True, "lidar": True, "hover_draw_W": 220, "cruise_draw_W": 0},
     # Custom demo
     "Urban Hawk Tiltrotor (Custom)": {"type": "Hybrid Tiltrotor eVTOL", "rtk": True, "lidar": True, "hover_draw_W": 300, "cruise_draw_W": 120},
@@ -128,7 +140,7 @@ if st.session_state.get("pending_apply"):
 # ─────────────────────────────────────────────
 st.sidebar.header("Mission / Sensor Settings")
 
-# UAV dropdown (back & expanded dataset)
+# UAV dropdown
 uav = st.sidebar.selectbox("UAV Model", list(uav_data.keys()), key="uav_model")
 specs = uav_data[uav]
 
@@ -193,7 +205,13 @@ def generate_aruco_png_bytes(marker_id: int, size_px: int = 800, border_bits: in
     from PIL import Image as PImage, ImageOps as PImageOps, ImageDraw
     if _ARUCO_OK:
         dict_ = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_1000)
-        img = cv2.aruco.generateImageMarker(dict_, marker_id, size_px)
+        # Support both APIs (OpenCV versions differ)
+        if hasattr(cv2.aruco, "generateImageMarker"):
+            img = cv2.aruco.generateImageMarker(dict_, marker_id, size_px)
+        elif hasattr(cv2.aruco, "drawMarker"):
+            img = cv2.aruco.drawMarker(dict_, marker_id, size_px)
+        else:
+            img = np.zeros((size_px, size_px), dtype=np.uint8)
         if border_bits > 0:
             img = cv2.copyMakeBorder(img, border_bits*10, border_bits*10, border_bits*10, border_bits*10,
                                      cv2.BORDER_CONSTANT, value=255)
@@ -217,7 +235,7 @@ def focal_length_px(hfov_deg: float, width_px: int) -> float:
     return width_px / (2.0 * np.tan(hfov / 2.0))
 
 def marker_pixels_from_alt(alt_m, marker_size_m, f_px):
-    """Return estimated marker pixel size. Works with scalars or NumPy arrays."""
+    """Vectorized marker pixel size. Works with scalars or NumPy arrays."""
     alt = np.asarray(alt_m, dtype=float)
     px = (float(f_px) * float(marker_size_m)) / np.maximum(alt, 1e-6)
     return float(px) if px.ndim == 0 else px
@@ -264,6 +282,7 @@ with col1:
     st.subheader("📍 Position Accuracy (RTK GNSS)")
     sigma_xy = 0.03 if rtk_fix else 1.5
     n_pts = 350
+    np.random.seed(seed)
     xy_noise = np.random.normal(0, sigma_xy, size=(n_pts, 2))
     if gps_glitch:
         xy_noise[np.random.randint(0, n_pts)] += np.array([3.0, -2.0])
@@ -280,6 +299,7 @@ with col1:
 with col2:
     st.subheader("📏 Altitude Accuracy (Lidar vs Barometer)")
     n = 350
+    np.random.seed(seed + 1)
     baro = np.random.normal(0, 0.25, n).cumsum() / 40.0
     if use_lidar:
         lidar = np.random.normal(0, 0.02, n)
@@ -393,6 +413,7 @@ def focal_px():
 start = st.button("Run Playback")
 
 if start:
+    np.random.seed(seed)
     run_uuid = str(uuid.uuid4())
     run_time_utc = dt.datetime.utcnow().isoformat() + "Z"
 
@@ -596,7 +617,7 @@ if start:
         "settings": settings_payload,
         "metrics": metrics_payload,
         "trace_columns": list(run_df.columns),
-        "trace_preview_head": run_df.head(5).to_dict(orient="list")  # small preview
+        "trace_preview_head": run_df.head(5).to_dict(orient="list")
     }
     json_bytes = json.dumps(log_json, indent=2).encode("utf-8")
     csv_bytes = run_df.to_csv(index=False).encode("utf-8")
@@ -765,4 +786,4 @@ with st.expander("Open Auto-Tuner"):
 # Footer
 with st.expander("UAV Spec Snapshot"):
     st.dataframe(pd.DataFrame(uav_data).T)
-st.caption("Tip: Use **Scenario Preset** to configure conditions quickly, then **Auto-Tune** and **Apply Best Settings**. Aim for XY≤0.2 m, V-speed≤0.5 m/s, high lock stability.")
+st.caption("Tip: Use Scenario Preset to configure conditions quickly, then Auto-Tune and Apply Best Settings. Aim for XY≤0.2 m, V-speed≤0.5 m/s, high lock stability.")
